@@ -331,6 +331,12 @@ pub fn setup_console(
     // Connect stdio to PTY slave
     connect_stdio(&slave.as_raw_fd(), &slave.as_raw_fd(), &slave.as_raw_fd())?;
 
+    // Clear ONLCR on the PTY master before handing it off, regardless of
+    // whether we're in the foreground or sending it to a console socket.
+    // This prevents the container's "\n" from being rewritten to "\r\n",
+    // which would cause incorrect newline rendering (cascading indentation).
+    clear_onlcr(&master)?;
+
     Ok(match console_fd {
         Some(console_fd) => {
             // Send PTY master to console socket
@@ -347,7 +353,6 @@ pub fn setup_console(
             PtyMaster::SentToSocket
         }
         None => {
-            clear_onlcr(&master)?;
             PtyMaster::Foreground(master)
         }
     })
@@ -357,9 +362,8 @@ pub fn setup_console(
 /// rewritten to "\r\n": a not-very-well-known default of Linux unix98 ptys is
 /// that they have +onlcr.
 ///
-/// runc does the same for the foreground path only ((*tty).recvtty); for the
-/// console-socket path the receiver of the master owns the termios, so it is
-/// left untouched there.
+/// This is done for both the foreground and console-socket paths so that
+/// newline rendering is correct regardless of how the PTY master is consumed.
 ///
 /// See: https://github.com/opencontainers/runc/blob/v1.4.0/tty.go
 fn clear_onlcr(pty: &OwnedFd) -> Result<()> {
